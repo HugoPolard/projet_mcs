@@ -9,14 +9,17 @@ void echo(int, struct sockaddr_in);
 void create_listening_socket(int*, int);
 void deroute();
 int socket_max();
-int auth_client(int , struct sockaddr_in);
+int auth_client(int fd, char* contenu_requete);
 int verif_user(char* login, char* mdp);
+void administration (int fd);
+int create_chat(int fd, char* contenu_requete);
+int new_chat(char* nom_chat);
 
 struct sockaddr_in svc , clt;
 socklen_t cltLen ;
 
 static services mes_services[4] = {
-	{"auth", SOCK_AUTH, 1, -1, "NULL"},
+	{"administration", SOCK_AUTH, 1, -1, "NULL"},
 	{"send_info", SOCK_SEND_INFO, 2, -1, "NULL"},
 	{"recv_info", SOCK_RECV_INFO, 3, -1, "NULL"},
 	{"NULL", 0, 0, -1, "NULL"}
@@ -69,9 +72,7 @@ int main() {
 			Pour parer au problème, on fait en sorte que si on sort du select avec une erreur, on ne fait rien et on reboucle directement sur le select,
 			ainsi on fait comme si l'appel n'avait pas été interrompu
 		*/
-		if(ret==-1)
-			printf("erreur select\n");
-		else {
+		if(ret!=-1) {
 			for (int i = 0 ; strcmp(mes_services[i].nom, "NULL") ; i++) {
 				if (FD_ISSET(mes_services[i].socket, &readfds)) {
 					socklen_t addrlen;
@@ -87,9 +88,8 @@ int main() {
 							CHECK(pid = fork(), "can't fork");
 							if (pid == 0) {
 								// Dialogue avec le client
-					            auth_client(fd, client_addr);
+					            administration(fd);
 					            close(fd);
-					            fprintf(stderr, "********** Fermeture de la session AUTH avec [%s:%d]\n", inet_ntoa(clt.sin_addr), ntohs(clt.sin_port));
 					            exit(0);
 					        }
 						break;
@@ -97,7 +97,7 @@ int main() {
 							CHECK(pid = fork(), "can't fork");
 							if (pid == 0) {
 								// Dialogue avec le client
-					            auth_client(fd, client_addr);
+					            //auth_client(fd, client_addr);
 					            close(fd);
 					            exit(0);
 					        }
@@ -106,7 +106,7 @@ int main() {
 							CHECK(pid = fork(), "can't fork");
 							if (pid == 0) {
 								// Dialogue avec le client
-					            auth_client(fd, client_addr);
+					            //auth_client(fd, client_addr);
 					            close(fd);
 					            exit(0);
 					        }
@@ -121,35 +121,112 @@ int main() {
 	return 0;
 }  
 
-int auth_client(int fd, struct sockaddr_in client_addr) {
+void administration (int fd) {
 	char* type, buffer[MAX_BUFF], *contenu;
-	char* login, *mdp;
-	int token;
 
-	printf("********** Ouverture d'une session AUTH avec [%s:%d]\n", inet_ntoa(clt.sin_addr), ntohs(clt.sin_port));
+	printf("********** Ouverture d'une session ADMINISTRATION avec [%s:%d]\n", inet_ntoa(clt.sin_addr), ntohs(clt.sin_port)); 
+
 	do {  
 		read(fd, buffer, sizeof(buffer));
-		printf("buffer : %s\n", buffer);
+		fprintf(stderr, "\t[Reçu : %s]\n", buffer);		
 		type = strtok(buffer, ":");
-		contenu = strtok(NULL, ":");
-		login = strtok(contenu, "-");
-		mdp = strtok(NULL, "-");
-		fprintf(stderr, "\t[Reçu : %s]\n", buffer);
-		fprintf(stderr, "\tVérification des identifiants %s - %s\n", login, mdp);
-		token = verif_user(login, mdp);
-		printf("token : %d\n", token);
-		if (token) {
-			sprintf(buffer, "OK:%d", token);
-			write(fd , buffer, strlen (buffer)+1); 
-			fprintf(stderr, "\t[Envoyé : %s]\n", buffer);
+		contenu = strtok(NULL, "\n");
+		if (!strcmp(type, "AUTH")) {
+			auth_client(fd, contenu);
 		}
-		else {
-			sprintf(buffer, "NOK:%d", token);
-			write(fd , buffer, strlen (buffer)+1); 
-			fprintf(stderr, "\t[Envoyé : %d]\n", buffer);
+		else if (!strcmp(type, "CREATE")) {
+			create_chat(fd, contenu);
 		}
 	} while (atoi(buffer) != 0);
-    fprintf(stderr, "********** Fermeture de la session AUTH avec [%s:%d]\n", inet_ntoa(clt.sin_addr), ntohs(clt.sin_port));
+    fprintf(stderr, "********** Fermeture de la session ADMINISTRATION avec [%s:%d]\n", inet_ntoa(clt.sin_addr), ntohs(clt.sin_port));
+}
+
+int create_chat(int fd, char* contenu_requete) {
+	int token = -1;
+
+	fprintf(stderr, "Création du chat %s \n", contenu_requete);
+	token = new_chat(contenu_requete);
+	if (token > 0) {
+		sprintf(buffer, "OK:%d", token);
+		write(fd , buffer, strlen (buffer)+1); 
+		fprintf(stderr, "\t[Envoyé : %s]\n", buffer);
+	}
+	else {
+		sprintf(buffer, "NOK:%d", token);
+		write(fd , buffer, strlen (buffer)+1); 
+		fprintf(stderr, "\t[Envoyé : %d]\n", buffer);
+	}
+	return token;
+}
+
+int auth_client(int fd, char* contenu_requete) {
+	char* login, *mdp;
+	int token = -1;
+
+	login = strtok(contenu_requete, "-");
+	mdp = strtok(NULL, "-");
+	fprintf(stderr, "\tVérification des identifiants %s - %s\n", login, mdp);
+	token = verif_user(login, mdp);
+	printf("token : %d\n", token);
+	if (token > 0) {
+		sprintf(buffer, "OK:%d", token);
+		write(fd , buffer, strlen (buffer)+1); 
+		fprintf(stderr, "\t[Envoyé : %s]\n", buffer);
+	}
+	else {
+		sprintf(buffer, "NOK:%d", token);
+		write(fd , buffer, strlen (buffer)+1); 
+		fprintf(stderr, "\t[Envoyé : %d]\n", buffer);
+	}
+	return token;
+}
+
+int new_chat(char* nom_chat) {
+	FILE* fd;
+    struct chat input; 
+    // Open person.dat for reading 
+    fd = fopen ("../files/chat_groups.dat", "r"); 
+    if (fd == NULL) 
+    { 
+        fprintf(stderr, "\nError opening file\n"); 
+        return -1;
+    } 
+    // read file contents till end of file 
+    while(fread(&input, sizeof(struct chat), 1, fd)) {
+        printf ("id = %d name = %s\n", input.id, input.nom);
+        if(!strcmp(input.nom, nom_chat)) {
+        	printf("Le chat existe déjà !\n");
+        	return 0;
+        }
+    }
+  
+    // close file 
+    fclose (fd); 
+      
+    // open file for writing 
+    fd = fopen ("../files/chat_groups.dat", "a"); 
+    if (fd == NULL) 
+    { 
+        fprintf(stderr, "\nError open file\n"); 
+        return -1;
+    } 
+  
+    struct chat input1 = {ftell(fd), ""}; 
+    strcpy(input1.nom, nom_chat);
+      
+    // write struct to file 
+    fwrite(&input1, sizeof(struct chat), 1, fd); 
+      
+    if(fwrite != 0)  
+        printf("Chat ajouté dans le fichier\n"); 
+    else {
+        printf("Erreur d'ecriture dans le fichier !\n"); 
+        return -1;
+    }
+  
+    // close file 
+    fclose (fd);
+	return input1.id;
 }
 
 int verif_user(char* login, char* mdp) {
@@ -164,20 +241,18 @@ int verif_user(char* login, char* mdp) {
 	printf("traitement du fichier users\n");
 	if(fd == NULL) {
 		printf("ERREUR d'ouverture du fichier\n");
-		return 1;
+		return -1;
 	}
 	while((rlen = getline(&line, &len, fd)) != -1) {
 		//passer à la ligne suivante
-		printf("ligne : %s\n", line);
 		test_login = strtok(line, "-");
 		test_mdp = strtok(NULL, "\n");
 		printf("login : %s, mdp : %s\n", test_login, test_mdp);
 		if (!strcmp(login, test_login) && !strcmp(mdp, test_mdp)) {
-			printf("CEST BON\n");
-			return 1;
+			return (int) ftell(fd);
 		}
 	}
-	printf("fin\n");
+	fclose(fd);
 	return 0;
 }
 

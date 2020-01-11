@@ -29,6 +29,7 @@
 #define SOCK_HOST 6700
 #define STR_SIZE 50
 #define NB_MAX_USERS 30
+#define NB_CHATS 10
 
 char buffer[MAX_BUFF];
 
@@ -46,3 +47,8 @@ typedef struct {
 	char passwd[STR_SIZE];
 	int session_token;
 } utilisateur;
+
+struct chat{
+	int id;
+	char nom[STR_SIZE];
+};

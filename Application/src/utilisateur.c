@@ -6,13 +6,19 @@ void dial_clt(int chat_sock, struct sockaddr_in clt);
 void create_listening_socket(int* sock, int port);
 void init_masque();
 void create_listening_socket(int* sock, int port);
-void authenticate(char* admin_addr);
+void authenticate();
+void command(char input[MAX_BUFF]);
+void message(char input[MAX_BUFF]);
+void cmd_auth(char* command);
+void cmd_create(char* command);
+void create_chat(char* chat_name);
 
 // Declaration dse variables globales
 struct sockaddr_in svc;
 socklen_t cltLen ;
 int listen_sock;
 utilisateur myProfile;
+char admin_address[STR_SIZE] = "0.0.0.0";
 
 void init_masque() {
 	// Création du masque de signaux
@@ -43,23 +49,30 @@ void create_listening_socket(int* sock, int port) {
 
 int main(int argc, char** argv) {
 	int pid;
-	char admin_addr[20];
-
-	printf("**************** Telegramm2i ****************\n");
-	printf("Veuillez renseigner l'adresse de l'administrateur du réseau :\n");
-	//scanf("%s", admin_addr);
-	strcpy(admin_addr, "127.0.0.1");
-	printf("\tAuthentification sur le réseau auprès de %s ...\n", admin_addr);
-	printf("login : \n");
-	//scanf("%s", myProfile.login);
-	strcpy(myProfile.login, "user1");
-	printf("mot de passe : \n");
-	//scanf("%s", myProfile.passwd);
-	strcpy(myProfile.passwd, "mdp1");
-	authenticate(admin_addr);
-	getchar();
+	char input[MAX_BUFF] = "/auth 127.0.0.1 user1 mdp1";
 
 	init_masque();
+	printf("**************** Telegramm2i ****************\n");
+
+	/*
+		Partie pour des tests plus rapides
+	*/
+	command(input);
+
+	while(1) {
+		printf(">");
+		fgets(input, MAX_BUFF, stdin);
+		input[strlen(input)-1] = '\0';	// supprime le \n
+		if (input[0] == '/') {
+			printf("commande reçue : %s\n", input);
+			command(input);
+		}
+		else {
+			printf("message reçu : %s\n", input);
+			message(input);
+		}
+	}
+
 	create_listening_socket(&listen_sock, SOCK_HOST);
 	// Boucle permanente de service
 	while  (1) {  
@@ -86,7 +99,39 @@ int main(int argc, char** argv) {
 
 }
 
-void authenticate(char* admin_addr) {
+void command(char input[MAX_BUFF]) {
+	char* command = input+1;	// On enlève le /
+	if(strstr(command, "auth")) {
+		cmd_auth(command);
+	}
+	else if(strstr(command, "create")) {
+		cmd_create(command);
+	}
+}
+
+void message(char input[MAX_BUFF]) {
+	printf("\n");
+}
+
+void cmd_create(char* command) {
+	char chat_name[STR_SIZE];
+	strtok(command, " ");	// On ne sauvegarde pas le nom de la commande
+	strcpy(chat_name, strtok(NULL, " "));
+	printf("Création du chat %s\n", chat_name);
+	create_chat(chat_name);
+}
+
+void cmd_auth(char* command) {
+	strtok(command, " "); // On ne sauvegarde pas le nom de la commande
+	strcpy(admin_address, strtok(NULL, " "));
+	printf("admin_address : %s\n", admin_address);
+	strcpy(myProfile.login, strtok(NULL, " "));
+	strcpy(myProfile.passwd, strtok(NULL, " "));
+	printf("\tAuthentification sur le réseau auprès de %s (%s:%s)\n", admin_address, myProfile.login, myProfile.passwd);
+	authenticate(admin_address);
+}
+
+void authenticate() {
 	int sock ;
 	struct sockaddr_in svc;
 	char reponse[MAX_BUFF];
@@ -97,7 +142,7 @@ void authenticate(char* admin_addr) {
 	// Préparation de l’adressage du service à contacter  
 	svc.sin_family = PF_INET;
 	svc.sin_port = htons(SOCK_AUTH);
-	svc.sin_addr.s_addr = inet_addr(admin_addr);  
+	svc.sin_addr.s_addr = inet_addr(admin_address);  
 	memset(&svc.sin_zero, 0, 8);  
 	// Demande d’une connexion au service  
 	CHECK(connect (sock, (struct sockaddr*)&svc, sizeof svc), "Can't connect"); // Dialogue avec le serveur 
@@ -106,16 +151,36 @@ void authenticate(char* admin_addr) {
 	strcat(requete, "-");
 	strcat(requete, myProfile.passwd);
 	// Envoi de la requete d'authentification contenant les informations nécessaires au serveur
-	fprintf(stderr, "[Envoyé : %s]\n", requete);
+	fprintf(stderr, "[Envoyé  à %s : %s]\n", admin_address, requete);
 	CHECK(write(sock, requete, strlen(requete)+1), "Can't send");
 	CHECK(read(sock, reponse,  sizeof (reponse)), "Can't send");
 	fprintf(stderr, "[Reçu : %s]\n", reponse);
-	getchar();
 	close(sock);
 }
 
-void dial_clt(int chat_sock, struct sockaddr_in clt) {
+void create_chat(char* chat_name) {
+	int sock ;
+	struct sockaddr_in svc;
+	char reponse[MAX_BUFF];
+	char requete[MAX_BUFF] = "CREATE:";
 
+	// Création de la socket d’appel et de dialogue  
+	CHECK(sock =socket(PF_INET, SOCK_STREAM, 0), " Can't create ");  
+	// Préparation de l’adressage du service à contacter  
+	svc.sin_family = PF_INET;
+	svc.sin_port = htons(SOCK_AUTH);
+	svc.sin_addr.s_addr = inet_addr(admin_address);  
+	memset(&svc.sin_zero, 0, 8);
+	// Demande d’une connexion au service  
+	CHECK(connect (sock, (struct sockaddr*)&svc, sizeof svc), "Can't connect"); // Dialogue avec le serveur 
+	// Ajout des infos dans la chaine de requete
+	strcat(requete, chat_name);
+	// Envoi de la requete d'authentification contenant les informations nécessaires au serveur
+	fprintf(stderr, "[Envoyé  à %s : %s]\n", admin_address, requete);
+	CHECK(write(sock, requete, strlen(requete)+1), "Can't send");
+	CHECK(read(sock, reponse,  sizeof (reponse)), "Can't send");
+	fprintf(stderr, "[Reçu : %s]\n", reponse);
+	close(sock);
 }
 
 void deroute (int signal_number)
