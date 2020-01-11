@@ -23,12 +23,13 @@
 #define NOK "Not OK"  
 #define MAX_BUFF 1024
 #define MAX_MSG 100
-#define SOCK_AUTH 6500
-#define SOCK_SEND_INFO 6501
-#define SOCK_RECV_INFO 6502
+#define SOCK_ADMIN 6500
+#define SOCK_REQ_INFO 6501
+#define SOCK_PUT_INFO 6502
 #define SOCK_HOST 6700
 #define STR_SIZE 50
 #define NB_MAX_USERS 30
+#define NB_MAX_CHATS 10
 #define NB_CHATS 10
 
 char buffer[MAX_BUFF];
