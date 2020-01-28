@@ -13,12 +13,14 @@ int auth_client(int fd, char* contenu_requete);
 int verif_user(char* login, char* mdp);
 void administration (int fd);
 int create_chat(int fd, char* contenu_requete);
-int new_chat(char* nom_chat);
+int new_chat(char* nom_chat, char* host_addr);
 int list_chats(int fd, char* contenu_requete);
 void send_information (int fd);
+void recv_information(int fd);
+int get_host(int fd, char* contenu_requete);
 
-struct sockaddr_in svc , clt;
-socklen_t cltLen ;
+struct sockaddr_in svc , client_addr;
+socklen_t client_addrLen ;
 
 static services mes_services[4] = {
 	{"administration", SOCK_ADMIN, 1, -1, "NULL"},
@@ -90,10 +92,10 @@ int main() {
 							CHECK(pid = fork(), "can't fork");
 							if (pid == 0) {
 								// Dialogue avec le client
-								printf("********** Ouverture d'une session ADMINISTRATION avec [%s:%d]\n", inet_ntoa(clt.sin_addr), ntohs(clt.sin_port)); 
+								printf("********** Ouverture d'une session ADMINISTRATION avec [%s:%d]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port)); 
 					            administration(fd);
 					            close(fd);
-				                fprintf(stderr, "********** Fermeture de la session ADMINISTRATION avec [%s:%d]\n", inet_ntoa(clt.sin_addr), ntohs(clt.sin_port));
+				                fprintf(stderr, "********** Fermeture de la session ADMINISTRATION avec [%s:%d]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 					            exit(0);
 					        }
 						break;
@@ -101,10 +103,10 @@ int main() {
 							CHECK(pid = fork(), "can't fork");
 							if (pid == 0) {
 								// Dialogue avec le client
-								printf("********** Ouverture d'une session SEND_INFORMATION avec [%s:%d]\n", inet_ntoa(clt.sin_addr), ntohs(clt.sin_port)); 
+								printf("********** Ouverture d'une session SEND_INFORMATION avec [%s:%d]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port)); 
 					            send_information(fd);
 					            close(fd);
-				                fprintf(stderr, "********** Fermeture de la session SEND_INFORMATION avec [%s:%d]\n", inet_ntoa(clt.sin_addr), ntohs(clt.sin_port));
+				                fprintf(stderr, "********** Fermeture de la session SEND_INFORMATION avec [%s:%d]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 					            exit(0);
 					        }
 						break;
@@ -112,8 +114,10 @@ int main() {
 							CHECK(pid = fork(), "can't fork");
 							if (pid == 0) {
 								// Dialogue avec le client
-					            //auth_client(fd, client_addr);
+								printf("********** Ouverture d'une session RECV_INFORMATION avec [%s:%d]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port)); 
+					            recv_information(fd);
 					            close(fd);
+				                fprintf(stderr, "********** Fermeture de la session RECV_INFORMATION avec [%s:%d]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 					            exit(0);
 					        }
 						break;
@@ -137,12 +141,6 @@ void administration (int fd) {
 		if (!strcmp(type, "AUTH")) {
 			auth_client(fd, contenu);
 		}
-		else if (!strcmp(type, "CREATE")) {
-			create_chat(fd, contenu);
-		}
-		else if (!strcmp(type, "LIST")) {
-			list_chats(fd, contenu);
-		}
 	} while (atoi(buffer) != 0);
 }
 
@@ -160,15 +158,35 @@ void send_information (int fd) {
 		if (!strcmp(type, "LIST")) {
 			list_chats(fd, contenu);
 		}
+		else if (!strcmp(type, "HOST")) {
+			get_host(fd, contenu);
+		}
+	} while (atoi(buffer) != 0);
+}
+
+void recv_information (int fd) {
+	char* type, buffer[MAX_BUFF], *contenu;
+
+	do {  
+		read(fd, buffer, sizeof(buffer));
+		fprintf(stderr, "\t[Reçu : %s]\n", buffer);		
+		type = strtok(buffer, ":");
+		contenu = strtok(NULL, "\n");
+		if (!strcmp(type, "CREATE")) {
+			create_chat(fd, contenu);
+		}
 	} while (atoi(buffer) != 0);
 }
 
 int create_chat(int fd, char* contenu_requete) {
 	int token = -1;
 	char buffer[MAX_BUFF];
+	char *chat_name, *host_addr;
 
-	fprintf(stderr, "Création du chat %s \n", contenu_requete);
-	token = new_chat(contenu_requete);
+	chat_name = strtok(contenu_requete, "-");
+	host_addr = strtok(NULL, "-");
+	fprintf(stderr, "Création du chat %s chez %s\n", chat_name, host_addr);
+	token = new_chat(contenu_requete, host_addr);
 	if (token > 0) {
 		sprintf(buffer, "OK:%d", token);
 		write(fd , buffer, strlen (buffer)+1); 
@@ -207,7 +225,7 @@ int auth_client(int fd, char* contenu_requete) {
 
 int list_chats(int fd, char* contenu_requete) {
 	FILE* fichier_chats;
-	char buffer[MAX_BUFF], buffer2[MAX_BUFF];
+	char buffer[MAX_BUFF] = "", buffer2[MAX_BUFF] = "";
     struct chat input;
     // Open person.dat for reading 
     fichier_chats = fopen ("../files/chat_groups.dat", "r"); 
@@ -236,7 +254,48 @@ int list_chats(int fd, char* contenu_requete) {
 	return 1;
 }
 
-int new_chat(char* nom_chat) {
+int get_host(int fd, char* contenu_requete) {
+	FILE* fichier_chats;
+	char buffer[MAX_BUFF] = "", buffer2[MAX_BUFF] = "";
+	char chat_name[STR_SIZE];
+    struct chat input;
+    // Open person.dat for reading 
+    fichier_chats = fopen ("../files/chat_groups.dat", "r");
+    strcpy(chat_name, contenu_requete);	// On a que le nom du chat dans le contenu
+    if (fichier_chats == NULL) 
+    { 
+        fprintf(stderr, "\nError opening file\n"); 
+        return -1;
+    }
+    // read file contents till end of file 
+    int indice = 0;
+    while(fread(&input, sizeof(struct chat), 1, fichier_chats)) {
+        printf ("name = %s host=%s\n", input.nom, input.host);
+        if (!strcmp(input.nom, chat_name)) {
+        	printf("channel trouve !\n");
+        	sprintf(buffer, "%s", input.host);
+        }
+        indice++;
+    }
+    // close file 
+    fclose (fichier_chats);
+    // Si on a rien trouvé
+    if (!strcmp(buffer, "")) {
+    	strcpy(buffer2, "NOK");
+		printf("envoi :%s\n", buffer2);
+		write(fd , buffer2, strlen (buffer2)+1); 
+		fprintf(stderr, "\t[Envoyé : %s]\n", buffer2);
+		return 0;
+    }
+    // Envoi de la liste à l'utilisateur
+	sprintf(buffer2, "OK:%s", buffer);
+	printf("envoi :%s\n", buffer2);
+	write(fd , buffer2, strlen (buffer2)+1); 
+	fprintf(stderr, "\t[Envoyé : %s]\n", buffer2);
+	return 1;
+}
+
+int new_chat(char* nom_chat, char* host_addr) {
 	FILE* fd;
     struct chat input; 
     // Open person.dat for reading 
@@ -249,7 +308,7 @@ int new_chat(char* nom_chat) {
     // read file contents till end of file 
     int compteur = 0;
     while(fread(&input, sizeof(struct chat), 1, fd)) {
-        printf ("id = %d name = %s\n", input.id, input.nom);
+        printf ("id = %d name = %s host = %s\n", input.id, input.nom, input.host);
         compteur++;
         if(!strcmp(input.nom, nom_chat)) {
         	printf("Le chat existe déjà !\n");
@@ -273,6 +332,7 @@ int new_chat(char* nom_chat) {
   
     struct chat input1 = {ftell(fd), ""}; 
     strcpy(input1.nom, nom_chat);
+    strcpy(input1.host, host_addr);
       
     // write struct to file 
     fwrite(&input1, sizeof(struct chat), 1, fd); 

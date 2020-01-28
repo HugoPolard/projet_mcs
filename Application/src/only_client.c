@@ -18,7 +18,7 @@ void cmd_join(char* command);
 void get_host(char* chat_name);
 void join_chat();
 void communication(int chat_sock);
-void administration(int chat_sock, struct sockaddr_in client_addr);
+void administration(int chat_sock);
 void server_listen();
 int add_client(int fd, struct sockaddr_in client_addr);
 
@@ -31,8 +31,6 @@ utilisateur myProfile;
 char admin_address[STR_SIZE] = "0.0.0.0";
 char host_address[STR_SIZE] = "0.0.0.0";
 int nombre_clients = 0;
-struct sockaddr_in chat_clients[NB_MAX_CLIENTS];
-int indice_last_client = 0;
 
 static services mes_services[4] = {
 	{"communication", SOCK_CHAT, 1, -1, "NULL"},
@@ -73,14 +71,14 @@ int main(int argc, char** argv) {
 
 	init_masque();
 	printf("**************** Telegramm2i ****************\n");
-
+	/*
 	CHECK(pid = fork(), "can't fork");
 	if (pid == 0) {
 		// Ecoute en parallèle des ports du serveur
         server_listen();
         exit(0);
     }
-
+*/
 	/*
 		Partie pour des tests plus rapides
 	*/
@@ -180,7 +178,7 @@ void server_listen() {
 			           		CHECK(pid = fork(), "can't fork");
 							if (pid == 0) {
 								// Dialogue avec le client
-					            administration(fd, client_addr);
+					            administration(fd);
 					            close(fd);
 					            fprintf(stderr, "********** Fermeture de la session ADMINISTRATION avec [%s:%d]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 					            exit(0);
@@ -301,7 +299,7 @@ void authenticate() {
 	// Envoi de la requete d'authentification contenant les informations nécessaires au serveur
 	fprintf(stderr, "[Envoyé  à %s : %s]\n", admin_address, requete);
 	CHECK(write(sock, requete, strlen(requete)+1), "Can't send");
-	CHECK(read(sock, reponse,  sizeof (reponse)), "Can't recv");
+	CHECK(read(sock, reponse,  sizeof (reponse)), "Can't send");
 	fprintf(stderr, "[Reçu : %s]\n", reponse);
 	close(sock);
 	printf("auth finie\n");
@@ -401,43 +399,55 @@ void communication(int chat_sock) {
 	} while (atoi(requete) != 0);		
 }
 
-void administration (int fd, struct sockaddr_in client_addr) {
+void administration (int fd) {
 	char* type, buffer[MAX_BUFF], *contenu;
-	int retour = 124;
-	printf("administration\n");
+	struct sockaddr_in client_addr;
 
 	do {  
 		read(fd, buffer, sizeof(buffer));
 		fprintf(stderr, "\t[Reçu : %s]\n", buffer);		
 		type = strtok(buffer, ":");
 		contenu = strtok(NULL, "\n");
-		if (!strcmp(type, "JOIN")) {
-			retour = add_client(fd, client_addr);
+		if (!strcmp(type, "AUTH")) {
+			inet_aton(contenu, &(client_addr.sin_addr));
+			add_client(fd, client_addr);
 		}
 	} while (atoi(buffer) != 0);
-	printf("retour de l'ajout: %d\n", retour);
 }
 
 int add_client(int fd, struct sockaddr_in client_addr) {
 	FILE* fichier_chats;
-	char buffer[MAX_BUFF] = "";
-	char* addr;
-	int indice_last_client = 0 ;
-	printf("ajout de client\n");
+	char buffer[MAX_BUFF] = "", buffer2[MAX_BUFF] = "";
 
-    if (nombre_clients > NB_MAX_CLIENTS) {
-    	printf("Il y a trop de clients\n");
+    if (nombre_clients > NB_MAX_CLIENTS)
     	return -1;
-    }
 
-    chat_clients[indice_last_client] = client_addr;
-    // Renvoi d'un ack
-    strcpy(buffer, "OK:");
-	printf("envoi :%s\n", buffer);
-	write(fd , buffer, strlen (buffer)+1); 
-	fprintf(stderr, "\t[Envoyé : %s]\n", buffer);
+    // Open person.dat for reading
+    fichier_chats = fopen ("../files/chat_members.dat", "a"); 
+    if (fichier_chats == NULL) 
+    { 
+        fprintf(stderr, "\nError open file\n"); 
+        return -1;
+    } 
+        
+    // write struct to file 
+    fwrite(&client_addr, sizeof(struct sockaddr_in), 1, fichier_chats); 
+      
+    if(fwrite != 0)  
+        printf("client ajouté dans le fichier\n"); 
+    else {
+        printf("Erreur d'ecriture dans le fichier !\n"); 
+        return -1;
+    }
+  
+    // close file 
+    fclose (fichier_chats);
+
+    // Envoi de la liste à l'utilisateur
+	printf("envoi :%s\n", "OK:");
+	write(fd , "OK:", strlen ("OK:")+1); 
+	fprintf(stderr, "\t[Envoyé : %s]\n", "OK:");
 	nombre_clients++;
-	indice_last_client++;
 	return 1;
 }
 
@@ -452,10 +462,7 @@ void deroute (int signal_number)
 			}
 		break;
 		case SIGINT : 
-			for (int i = 0 ; i < 4 ; i++) {
-				if (mes_services[i].socket != -1)
-					CHECK(close(mes_services[i].socket), "can't close");
-			}
+			CHECK(close(listen_sock), "can't close");
 			exit(0);
 		break;
 	}
