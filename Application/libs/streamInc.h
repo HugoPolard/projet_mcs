@@ -26,10 +26,13 @@
 #define SOCK_ADMIN 6500
 #define SOCK_REQ_INFO 6501
 #define SOCK_PUT_INFO 6502
-#define SOCK_HOST 6700
+#define SOCK_CLIENT 6600
+#define SOCK_CHAT 6700
+#define SOCK_CHAT_ADMIN 6701
 #define STR_SIZE 50
 #define NB_MAX_USERS 30
 #define NB_MAX_CHATS 10
+#define NB_MAX_CLIENTS 10
 #define NB_CHATS 10
 
 char buffer[MAX_BUFF];
@@ -52,4 +55,5 @@ typedef struct {
 struct chat{
 	int id;
 	char nom[STR_SIZE];
+	char host[STR_SIZE];
 };
