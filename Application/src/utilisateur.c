@@ -21,6 +21,9 @@ void communication(int chat_sock);
 void administration(int chat_sock, struct sockaddr_in client_addr);
 void server_listen();
 int add_client(int fd, struct sockaddr_in client_addr);
+void rcv_msg_server(int fd);
+void rcv_msg_client(int fd);
+int send_msg(int socket, char* message);
 
 
 // Declaration dse variables globales
@@ -31,12 +34,14 @@ utilisateur myProfile;
 char admin_address[STR_SIZE] = "0.0.0.0";
 char host_address[STR_SIZE] = "0.0.0.0";
 int nombre_clients = 0;
-struct sockaddr_in chat_clients[NB_MAX_CLIENTS];
+int chat_clients[NB_MAX_CLIENTS];
 int indice_last_client = 0;
+int sock_to_host = -1;
 
 static services mes_services[4] = {
-	{"communication", SOCK_CHAT, 1, -1, "NULL"},
-	{"administration", SOCK_CHAT_ADMIN, 2, -1, "NULL"},
+	{"rcv_msg_server", SOCK_CHAT, 1, -1, "NULL"},
+	{"rcv_msg_client", SOCK_CLIENT, 2, -1, "NULL"},
+	{"administration", SOCK_CHAT_ADMIN, 3, -1, "NULL"},
 	{"NULL", 0, 0, -1, "NULL"}
 };
 
@@ -80,7 +85,7 @@ int main(int argc, char** argv) {
         server_listen();
         exit(0);
     }
-
+	
 	/*
 		Partie pour des tests plus rapides
 	*/
@@ -94,14 +99,13 @@ int main(int argc, char** argv) {
 		fgets(input, MAX_BUFF, stdin);
 		input[strlen(input)-1] = '\0';	// supprime le \n
 		if (input[0] == '/') {
-			printf("commande reçue : %s\n", input);
 			command(input);
 		}
 		else {
-			printf("message reçu : %s\n", input);
 			message(input);
 		}
 	}
+	close(sock_to_host);
 	close(listen_sock);
 	exit(0);
 
@@ -169,20 +173,33 @@ void server_listen() {
 		           		case 1 :
 			           		CHECK(pid = fork(), "can't fork");
 							if (pid == 0) {
+								fprintf(stderr, "********** Ouverture de la session RCV_MSG_SERVER avec [%s:%d]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 								// Dialogue avec le client
-					            communication(fd);
+					            rcv_msg_server(fd);
 					            close(fd);
-					            fprintf(stderr, "********** Fermeture de la session COMMUNICATION avec [%s:%d]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+					            fprintf(stderr, "********** Fermeture de la session RCV_MSG_SERVER avec [%s:%d]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 					            exit(0);
 					        }
 					    break;
-						case 2 :
+					    case 2 :
 			           		CHECK(pid = fork(), "can't fork");
 							if (pid == 0) {
 								// Dialogue avec le client
+								fprintf(stderr, "********** Ouverture de la session RCV_MSG_CLIENT avec [%s:%d]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+					            rcv_msg_client(fd);
+					            close(fd);
+					            fprintf(stderr, "********** Fermeture de la session RCV_MSG_CLIENT avec [%s:%d]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+					            exit(0);
+					        }
+					    break;
+						case 3 :
+			           		CHECK(pid = fork(), "can't fork");
+							if (pid == 0) {
+								// Dialogue avec le client
+								fprintf(stderr, "********** Ouverture de la session ADMINISTRATION_HOST avec [%s:%d]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 					            administration(fd, client_addr);
 					            close(fd);
-					            fprintf(stderr, "********** Fermeture de la session ADMINISTRATION avec [%s:%d]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+					            fprintf(stderr, "********** Fermeture de la session ADMINISTRATION_HOST avec [%s:%d]\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 					            exit(0);
 					        }
 					    break;
@@ -211,7 +228,11 @@ void command(char input[MAX_BUFF]) {
 }
 
 void message(char input[MAX_BUFF]) {
-	printf("\n");
+	if (sock_to_host == -1) {
+		printf("Actuellement dans aucun chat, utilisez la commande /join\n");
+		return;
+	}
+	send_msg(sock_to_host, input);
 }
 
 void cmd_create(char* command) {
@@ -362,10 +383,11 @@ void get_host(char* chat_name) {
 }
 
 void join_chat() {
-	int sock ;
+	int sock;
 	struct sockaddr_in svc;
 	char reponse[MAX_BUFF];
 	char requete[MAX_BUFF] = "JOIN:";
+	char* retour;
 
 	// Création de la socket d’appel et de dialogue  
 	CHECK(sock =socket(PF_INET, SOCK_STREAM, 0), " Can't create ");  
@@ -378,34 +400,49 @@ void join_chat() {
 	printf("Tentative de connexion à %s : %d\n", host_address, SOCK_CHAT);
 	// Demande d’une connexion au service  
 	CHECK(connect (sock, (struct sockaddr*)&svc, sizeof svc), "Can't connect"); // Dialogue avec le serveur 
-	// Envoi de la requete d'authentification contenant les informations nécessaires au serveur
+	// Envoi de l'acquitement
 	fprintf(stderr, "[Envoyé  à %s : %s]\n", admin_address, requete);
 	CHECK(write(sock, requete, strlen(requete)+1), "Can't send");
 	CHECK(read(sock, reponse,  sizeof (reponse)), "Can't recv");
 	fprintf(stderr, "[Reçu : %s]\n", reponse);
+
+	retour = strtok(reponse, ":");
+	printf("retour de la demande : %s-\n", retour);
+	if(!strcmp(retour, "OK")) {
+		svc.sin_port = htons(SOCK_CHAT);
+		CHECK(sock_to_host =socket(PF_INET, SOCK_STREAM, 0), " Can't create ");  
+		CHECK(connect (sock_to_host, (struct sockaddr*)&svc, sizeof svc), "Can't connect"); // Dialogue avec le serveur 
+		printf("socket resultant de la connexion : %d\n", sock_to_host);
+		strcpy(requete, "/bonjour");
+		fprintf(stderr, "[Envoyé : %s]\n", requete);
+		CHECK(write(sock, requete, strlen(requete)+1), "Can't send");
+	}
 	close(sock);
 }
 
-// Partie serveur : fonctions
-
-void communication(int chat_sock) {
-	char requete[MAX_BUFF];
+void rcv_msg_client(int fd) {
 	do {
-		read(chat_sock, buffer, sizeof(buffer));
-		sscanf(buffer, "%s:%s", requete , buffer);
-		fprintf(stderr, "\t[Reçu : %s]\n", buffer);
-		sscanf(buffer, "%s:%s", requete , buffer);
-		fprintf(stderr, "\t[Reçu : %s]\n", buffer); 
-		write(chat_sock , buffer,  strlen (buffer)+1);  
-		fprintf(stderr, "\t[Envoyé : %s]\n", buffer);
-	} while (atoi(requete) != 0);		
+		read(fd, buffer, sizeof(buffer));
+		printf("-->%s\n", buffer);
+	} while (strcmp(buffer, "/fin_chat"));	
+}
+
+// Partie serveur : fonctions
+void rcv_msg_server(int fd) {
+	do {
+		read(fd, buffer, sizeof(buffer));
+		for (int i = 0 ; i <= indice_last_client ; i++)
+			send_msg(chat_clients[i], buffer);
+	} while (strcmp(buffer, "/aurevoir"));		
+}
+
+int send_msg(int fd, char* message) {
+	write(fd , message,  strlen (message)+1);  
 }
 
 void administration (int fd, struct sockaddr_in client_addr) {
 	char* type, buffer[MAX_BUFF], *contenu;
 	int retour = 124;
-	printf("administration\n");
-
 	do {  
 		read(fd, buffer, sizeof(buffer));
 		fprintf(stderr, "\t[Reçu : %s]\n", buffer);		
@@ -415,7 +452,6 @@ void administration (int fd, struct sockaddr_in client_addr) {
 			retour = add_client(fd, client_addr);
 		}
 	} while (atoi(buffer) != 0);
-	printf("retour de l'ajout: %d\n", retour);
 }
 
 int add_client(int fd, struct sockaddr_in client_addr) {
@@ -427,17 +463,42 @@ int add_client(int fd, struct sockaddr_in client_addr) {
 
     if (nombre_clients > NB_MAX_CLIENTS) {
     	printf("Il y a trop de clients\n");
+    	strcpy(buffer, "NOK:");
+		printf("envoi :%s\n", buffer);
+		write(fd , buffer, strlen (buffer)+1); 
+		fprintf(stderr, "\t[Envoyé : %s]\n", buffer);
     	return -1;
     }
 
-    chat_clients[indice_last_client] = client_addr;
     // Renvoi d'un ack
     strcpy(buffer, "OK:");
 	printf("envoi :%s\n", buffer);
 	write(fd , buffer, strlen (buffer)+1); 
 	fprintf(stderr, "\t[Envoyé : %s]\n", buffer);
+
+	int sock_to_client;
+
+	//connexion pour rcv_msg_client
+	char reponse[MAX_BUFF], requete[MAX_BUFF];
+
+	// Création de la socket d’appel et de dialogue  
+	CHECK(sock_to_client =socket(PF_INET, SOCK_STREAM, 0), " Can't create ");  
+	// Préparation de l’adressage du service à contacter  
+	client_addr.sin_port = htons(SOCK_CLIENT);
+	// Demande d’une connexion au service  
+	printf("tentative de co à %s:%d\n", client_addr.sin_addr);
+	CHECK(connect (sock_to_client, (struct sockaddr*)&svc, sizeof svc), "Can't connect"); // Dialogue avec le serveur 
+	// Envoi de l'acquitement
+	strcpy(requete, "/welcome");
+	fprintf(stderr, "[Envoyé  à %s : %s]\n", admin_address, requete);
+	CHECK(write(sock_to_client, requete, strlen(requete)+1), "Can't send");
+	CHECK(read(sock_to_client, reponse,  sizeof (reponse)), "Can't recv");
+	fprintf(stderr, "[Reçu : %s]\n", reponse);
+
+	chat_clients[indice_last_client] = sock_to_client;
 	nombre_clients++;
 	indice_last_client++;
+
 	return 1;
 }
 
@@ -456,6 +517,7 @@ void deroute (int signal_number)
 				if (mes_services[i].socket != -1)
 					CHECK(close(mes_services[i].socket), "can't close");
 			}
+			close(sock_to_host);
 			exit(0);
 		break;
 	}
